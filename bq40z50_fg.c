@@ -374,7 +374,7 @@ static void fg_read_fw_version(struct bq_fg_chip *bq)
 	}
 
 	bq_log("FW Ver:%04X, Build:%04X\n",
-		buf[2] << 8 | buf[3], buf[4] << 8 | buf[5]);
+			buf[2] << 8 | buf[3], buf[4] << 8 | buf[5]);
 	bq_log("Ztrack Ver:%04X\n", buf[7] << 8 | buf[8]);
 }
 
@@ -609,128 +609,128 @@ static enum power_supply_property fg_props[] = {
 };
 
 static int fg_get_property(struct power_supply *psy, enum power_supply_property psp,
-					union power_supply_propval *val)
+		union power_supply_propval *val)
 {
 	struct bq_fg_chip *bq = power_supply_get_drvdata(psy);
 	int ret;
 
 	switch (psp) {
-	case POWER_SUPPLY_PROP_STATUS:
-		val->intval = fg_get_batt_status(bq);
-		break;
-	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
-		ret = fg_read_volt(bq);
-		mutex_lock(&bq->data_lock);
-		if (ret >= 0)
-			bq->batt_volt = ret;
-		val->intval = bq->batt_volt * 1000;
-		mutex_unlock(&bq->data_lock);
-
-		break;
-	case POWER_SUPPLY_PROP_PRESENT:
-		val->intval = 1;
-		break;
-	case POWER_SUPPLY_PROP_CURRENT_NOW:
-		mutex_lock(&bq->data_lock);
-		fg_read_current(bq, &bq->batt_curr);
-		val->intval = -bq->batt_curr * 1000;
-		mutex_unlock(&bq->data_lock);
-		break;
-
-	case POWER_SUPPLY_PROP_CAPACITY:
-		if (bq->fake_soc >= 0) {
-			val->intval = bq->fake_soc;
+		case POWER_SUPPLY_PROP_STATUS:
+			val->intval = fg_get_batt_status(bq);
 			break;
-		}
-		ret = fg_read_rsoc(bq);
-		mutex_lock(&bq->data_lock);
-		if (ret >= 0)
-			bq->batt_soc = ret;
-		val->intval = bq->batt_soc;
-		mutex_unlock(&bq->data_lock);
-		break;
+		case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+			ret = fg_read_volt(bq);
+			mutex_lock(&bq->data_lock);
+			if (ret >= 0)
+				bq->batt_volt = ret;
+			val->intval = bq->batt_volt * 1000;
+			mutex_unlock(&bq->data_lock);
 
-	case POWER_SUPPLY_PROP_CAPACITY_LEVEL:
-		val->intval = fg_get_batt_capacity_level(bq);
-		break;
-
-	case POWER_SUPPLY_PROP_TEMP:
-		if (bq->fake_temp != -EINVAL) {
-			val->intval = bq->fake_temp;
 			break;
-		}
-		ret = fg_read_temperature(bq);
-		mutex_lock(&bq->data_lock);
-		if (ret > 0)
-			bq->batt_temp = ret;
-		val->intval = bq->batt_temp;
-		mutex_unlock(&bq->data_lock);
-		break;
+		case POWER_SUPPLY_PROP_PRESENT:
+			val->intval = 1;
+			break;
+		case POWER_SUPPLY_PROP_CURRENT_NOW:
+			mutex_lock(&bq->data_lock);
+			fg_read_current(bq, &bq->batt_curr);
+			val->intval = -bq->batt_curr * 1000;
+			mutex_unlock(&bq->data_lock);
+			break;
 
-	case POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW:
-		ret = fg_read_tte(bq);
-		mutex_lock(&bq->data_lock);
-		if (ret >= 0)
-			bq->batt_tte = ret;
+		case POWER_SUPPLY_PROP_CAPACITY:
+			if (bq->fake_soc >= 0) {
+				val->intval = bq->fake_soc;
+				break;
+			}
+			ret = fg_read_rsoc(bq);
+			mutex_lock(&bq->data_lock);
+			if (ret >= 0)
+				bq->batt_soc = ret;
+			val->intval = bq->batt_soc;
+			mutex_unlock(&bq->data_lock);
+			break;
 
-		val->intval = bq->batt_tte;
-		mutex_unlock(&bq->data_lock);
-		break;
+		case POWER_SUPPLY_PROP_CAPACITY_LEVEL:
+			val->intval = fg_get_batt_capacity_level(bq);
+			break;
 
-	case POWER_SUPPLY_PROP_CHARGE_FULL:
-		ret = fg_read_fcc(bq);
-		mutex_lock(&bq->data_lock);
-		if (ret > 0)
-			bq->batt_fcc = ret;
-		val->intval = bq->batt_fcc * 1000;
-		mutex_unlock(&bq->data_lock);
-		break;
+		case POWER_SUPPLY_PROP_TEMP:
+			if (bq->fake_temp != -EINVAL) {
+				val->intval = bq->fake_temp;
+				break;
+			}
+			ret = fg_read_temperature(bq);
+			mutex_lock(&bq->data_lock);
+			if (ret > 0)
+				bq->batt_temp = ret;
+			val->intval = bq->batt_temp;
+			mutex_unlock(&bq->data_lock);
+			break;
 
-	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
-		ret = fg_read_dc(bq);
-		mutex_lock(&bq->data_lock);
-		if (ret > 0)
-			bq->batt_dc = ret;
-		val->intval = bq->batt_dc * 1000;
-		mutex_unlock(&bq->data_lock);
-		break;
+		case POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW:
+			ret = fg_read_tte(bq);
+			mutex_lock(&bq->data_lock);
+			if (ret >= 0)
+				bq->batt_tte = ret;
 
-	case POWER_SUPPLY_PROP_CYCLE_COUNT:
-		ret = fg_read_cyclecount(bq);
-		mutex_lock(&bq->data_lock);
-		if (ret >= 0)
-			bq->batt_cyclecnt = ret;
-		val->intval = bq->batt_cyclecnt;
-		mutex_unlock(&bq->data_lock);
-		break;
+			val->intval = bq->batt_tte;
+			mutex_unlock(&bq->data_lock);
+			break;
 
-	case POWER_SUPPLY_PROP_TECHNOLOGY:
-		val->intval = POWER_SUPPLY_TECHNOLOGY_LIPO;
-		break;
+		case POWER_SUPPLY_PROP_CHARGE_FULL:
+			ret = fg_read_fcc(bq);
+			mutex_lock(&bq->data_lock);
+			if (ret > 0)
+				bq->batt_fcc = ret;
+			val->intval = bq->batt_fcc * 1000;
+			mutex_unlock(&bq->data_lock);
+			break;
 
-	default:
-		return -EINVAL;
+		case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+			ret = fg_read_dc(bq);
+			mutex_lock(&bq->data_lock);
+			if (ret > 0)
+				bq->batt_dc = ret;
+			val->intval = bq->batt_dc * 1000;
+			mutex_unlock(&bq->data_lock);
+			break;
+
+		case POWER_SUPPLY_PROP_CYCLE_COUNT:
+			ret = fg_read_cyclecount(bq);
+			mutex_lock(&bq->data_lock);
+			if (ret >= 0)
+				bq->batt_cyclecnt = ret;
+			val->intval = bq->batt_cyclecnt;
+			mutex_unlock(&bq->data_lock);
+			break;
+
+		case POWER_SUPPLY_PROP_TECHNOLOGY:
+			val->intval = POWER_SUPPLY_TECHNOLOGY_LIPO;
+			break;
+
+		default:
+			return -EINVAL;
 	}
 	return 0;
 }
 static void fg_dump_registers(struct bq_fg_chip *bq);
 
 static int fg_set_property(struct power_supply *psy,
-			       enum power_supply_property prop,
-			       const union power_supply_propval *val)
+		enum power_supply_property prop,
+		const union power_supply_propval *val)
 {
 	struct bq_fg_chip *bq = power_supply_get_drvdata(psy);
 
 	switch (prop) {
-	case POWER_SUPPLY_PROP_TEMP:
-		bq->fake_temp = val->intval;
-		break;
-	case POWER_SUPPLY_PROP_CAPACITY:
-		bq->fake_soc = val->intval;
-		power_supply_changed(bq->fg_psy);
-		break;
-	default:
-		return -EINVAL;
+		case POWER_SUPPLY_PROP_TEMP:
+			bq->fake_temp = val->intval;
+			break;
+		case POWER_SUPPLY_PROP_CAPACITY:
+			bq->fake_soc = val->intval;
+			power_supply_changed(bq->fg_psy);
+			break;
+		default:
+			return -EINVAL;
 	}
 
 	return 0;
@@ -738,18 +738,18 @@ static int fg_set_property(struct power_supply *psy,
 
 
 static int fg_prop_is_writeable(struct power_supply *psy,
-				       enum power_supply_property prop)
+		enum power_supply_property prop)
 {
 	int ret;
 
 	switch (prop) {
-	case POWER_SUPPLY_PROP_TEMP:
-	case POWER_SUPPLY_PROP_CAPACITY:
-		ret = 1;
-		break;
-	default:
-		ret = 0;
-		break;
+		case POWER_SUPPLY_PROP_TEMP:
+		case POWER_SUPPLY_PROP_CAPACITY:
+			ret = 1;
+			break;
+		default:
+			ret = 0;
+			break;
 	}
 	return ret;
 }
@@ -771,8 +771,8 @@ static int fg_psy_register(struct bq_fg_chip *bq)
 	fg_psy_cfg.drv_data = bq;
 	fg_psy_cfg.num_supplicants = 0;
 	bq->fg_psy = devm_power_supply_register(bq->dev,
-						&bq->fg_psy_d,
-						&fg_psy_cfg);
+			&bq->fg_psy_d,
+			&fg_psy_cfg);
 	if (IS_ERR(bq->fg_psy)) {
 		bq_err("Failed to register fg_psy");
 		return PTR_ERR(bq->fg_psy);
@@ -797,7 +797,7 @@ static const u8 fg_dump_regs[] = {
 };
 
 static ssize_t fg_attr_show_Ra_table(struct device *dev,
-				struct device_attribute *attr, char *buf)
+		struct device_attribute *attr, char *buf)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct bq_fg_chip *bq = i2c_get_clientdata(client);
@@ -824,7 +824,7 @@ static ssize_t fg_attr_show_Ra_table(struct device *dev,
 }
 
 static ssize_t fg_attr_show_Qmax(struct device *dev,
-				struct device_attribute *attr, char *buf)
+		struct device_attribute *attr, char *buf)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct bq_fg_chip *bq = i2c_get_clientdata(client);
@@ -899,7 +899,7 @@ static void fg_update_status(struct bq_fg_chip *bq)
 
 	mutex_unlock(&bq->data_lock);
 	bq_log("RSOC:%d, Volt:%d, Current:%d, Temperature:%d\n",
-		bq->batt_soc, bq->batt_volt, bq->batt_curr, bq->batt_temp);
+			bq->batt_soc, bq->batt_volt, bq->batt_curr, bq->batt_temp);
 }
 
 static void fg_monitor_workfunc(struct work_struct *work)
@@ -923,85 +923,85 @@ static void determine_initial_status(struct bq_fg_chip *bq)
 
 static int bq_fg_probe(struct i2c_client *client)
 {
-    int ret;
-    struct bq_fg_chip *bq;
-    u8 *regs;
+	int ret;
+	struct bq_fg_chip *bq;
+	u8 *regs;
 
-    bq = devm_kzalloc(&client->dev, sizeof(*bq), GFP_KERNEL);
+	bq = devm_kzalloc(&client->dev, sizeof(*bq), GFP_KERNEL);
 
-    if (!bq)
-        return -ENOMEM;
+	if (!bq)
+		return -ENOMEM;
 
-    bq->dev = &client->dev;
-    bq->client = client;
-    bq->chip =  BQ40Z50;
+	bq->dev = &client->dev;
+	bq->client = client;
+	bq->chip =  BQ40Z50;
 
-    bq->batt_soc    = -ENODATA;
-    bq->batt_fcc    = -ENODATA;
-    bq->batt_rm     = -ENODATA;
-    bq->batt_dc     = -ENODATA;
-    bq->batt_volt   = -ENODATA;
-    bq->batt_temp   = -ENODATA;
-    bq->batt_curr   = -ENODATA;
-    bq->batt_cyclecnt = -ENODATA;
+	bq->batt_soc    = -ENODATA;
+	bq->batt_fcc    = -ENODATA;
+	bq->batt_rm     = -ENODATA;
+	bq->batt_dc     = -ENODATA;
+	bq->batt_volt   = -ENODATA;
+	bq->batt_temp   = -ENODATA;
+	bq->batt_curr   = -ENODATA;
+	bq->batt_cyclecnt = -ENODATA;
 
-    bq->fake_soc    = -EINVAL;
-    bq->fake_temp   = -EINVAL;
+	bq->fake_soc    = -EINVAL;
+	bq->fake_temp   = -EINVAL;
 
-    if (bq->chip == BQ40Z50) {
-        regs = bq40z50_regs;
-    } else {
-        bq_err("unexpected fuel gauge: %d\n", bq->chip);
-        regs = bq40z50_regs;
-    }
+	if (bq->chip == BQ40Z50) {
+		regs = bq40z50_regs;
+	} else {
+		bq_err("unexpected fuel gauge: %d\n", bq->chip);
+		regs = bq40z50_regs;
+	}
 
-    memcpy(bq->regs, regs, NUM_REGS);
+	memcpy(bq->regs, regs, NUM_REGS);
 
-    i2c_set_clientdata(client, bq);
+	i2c_set_clientdata(client, bq);
 
-    mutex_init(&bq->i2c_rw_lock);
-    mutex_init(&bq->data_lock);
-    mutex_init(&bq->irq_complete);
+	mutex_init(&bq->i2c_rw_lock);
+	mutex_init(&bq->data_lock);
+	mutex_init(&bq->irq_complete);
 
-    bq->resume_completed = true;
-    bq->irq_waiting = false;
+	bq->resume_completed = true;
+	bq->irq_waiting = false;
 
-    if (client->irq) {
-        ret = devm_request_threaded_irq(&client->dev, client->irq, NULL,
-            fg_btp_irq_thread,
-            IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
-            "bq fuel gauge irq", bq);
-        if (ret < 0) {
-            bq_err("request irq for irq=%d failed, ret = %d\n", client->irq, ret);
-            goto err_1;
-        }
-        enable_irq_wake(client->irq);
-    }
+	if (client->irq) {
+		ret = devm_request_threaded_irq(&client->dev, client->irq, NULL,
+				fg_btp_irq_thread,
+				IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+				"bq fuel gauge irq", bq);
+		if (ret < 0) {
+			bq_err("request irq for irq=%d failed, ret = %d\n", client->irq, ret);
+			goto err_1;
+		}
+		enable_irq_wake(client->irq);
+	}
 
-    device_init_wakeup(bq->dev, 1);
+	device_init_wakeup(bq->dev, 1);
 
-    fg_read_fw_version(bq);
+	fg_read_fw_version(bq);
 
-    fg_psy_register(bq);
+	fg_psy_register(bq);
 
-    ret = devm_device_add_group(bq->dev, &fg_attr_group);
-    if (ret) {
-    bq_err("Failed to register sysfs, err:%d\n", ret);
-        goto err_2;
-    }
-    determine_initial_status(bq);
+	ret = devm_device_add_group(bq->dev, &fg_attr_group);
+	if (ret) {
+		bq_err("Failed to register sysfs, err:%d\n", ret);
+		goto err_2;
+	}
+	determine_initial_status(bq);
 
-    INIT_DELAYED_WORK(&bq->monitor_work, fg_monitor_workfunc);
-    schedule_delayed_work(&bq->monitor_work, 5 * HZ);
+	INIT_DELAYED_WORK(&bq->monitor_work, fg_monitor_workfunc);
+	schedule_delayed_work(&bq->monitor_work, 5 * HZ);
 
-    bq_log("bq fuel gauge probe successfully, %s\n",
-            device2str[bq->chip]);
+	bq_log("bq fuel gauge probe successfully, %s\n",
+			device2str[bq->chip]);
 
-    return 0;
+	return 0;
 err_2:
-    fg_psy_unregister(bq);
+	fg_psy_unregister(bq);
 err_1:
-    return ret;
+	return ret;
 }
 
 static inline bool is_device_suspended(struct bq_fg_chip *bq)
@@ -1094,16 +1094,16 @@ static const struct dev_pm_ops bq_fg_pm_ops = {
 };
 
 static struct i2c_driver bq_fg_driver = {
-    .driver = {
-        .name   = "bq40z50",
-        .owner  = THIS_MODULE,
-        .of_match_table = bq_fg_match_table,
-        .pm     = &bq_fg_pm_ops,
-    },
-    .probe    = bq_fg_probe,
-    .remove   = bq_fg_remove,
-    .shutdown = bq_fg_shutdown,
-    .id_table = bq_fg_id,
+	.driver = {
+		.name   = "bq40z50",
+		.owner  = THIS_MODULE,
+		.of_match_table = bq_fg_match_table,
+		.pm     = &bq_fg_pm_ops,
+	},
+	.probe    = bq_fg_probe,
+	.remove   = bq_fg_remove,
+	.shutdown = bq_fg_shutdown,
+	.id_table = bq_fg_id,
 };
 
 module_i2c_driver(bq_fg_driver);

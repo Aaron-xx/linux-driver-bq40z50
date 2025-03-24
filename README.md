@@ -23,7 +23,7 @@
 
 ### 2. 编译驱动
 ```sh
-make
+make && sudo cp bq40z50.ko /lib/modules/$(uname -r)/kernel/drivers/power/ && sudo depmod
 ```
 
 ### 3. 加载驱动
