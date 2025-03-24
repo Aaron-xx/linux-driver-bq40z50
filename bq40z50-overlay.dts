@@ -1,0 +1,22 @@
+// bq40z50-overlay.dts
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2835";
+    
+    fragment@0 {
+        target = <&i2c1>;  // 使用树莓派的i2c1总线，根据实际情况可能需要调整
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            status = "okay";
+            
+            bq40z50: bq40z50@0b {  // I2C地址0x0B，根据实际情况调整
+                compatible = "ti,bq40z50";
+                reg = <0x0B>;
+                status = "okay";
+            };
+        };
+    };
+};
