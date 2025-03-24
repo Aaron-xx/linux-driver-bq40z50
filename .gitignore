@@ -1,0 +1,19 @@
+### `.gitignore`
+```plaintext
+# 编译生成的文件
+*.o
+*.ko
+*.mod.*
+.modules.order
+.cmd
+.tmp_versions/
+Module.symvers
+
+# 设备树编译生成的文件
+*.dtbo
+
+# 备份和临时文件
+*.swp
+*.bak
+*~
+
