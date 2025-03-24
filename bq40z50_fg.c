@@ -984,10 +984,11 @@ static int bq_fg_probe(struct i2c_client *client)
 
     fg_psy_register(bq);
 
-    ret = sysfs_create_group(&bq->dev->kobj, &fg_attr_group);
-    if (ret)
-        bq_err("Failed to register sysfs, err:%d\n", ret);
-
+    ret = devm_device_add_group(bq->dev, &fg_attr_group);
+    if (ret) {
+    bq_err("Failed to register sysfs, err:%d\n", ret);
+        goto err_2;
+    }
     determine_initial_status(bq);
 
     INIT_DELAYED_WORK(&bq->monitor_work, fg_monitor_workfunc);
@@ -997,9 +998,9 @@ static int bq_fg_probe(struct i2c_client *client)
             device2str[bq->chip]);
 
     return 0;
-
-err_1:
+err_2:
     fg_psy_unregister(bq);
+err_1:
     return ret;
 }
 
@@ -1060,19 +1061,13 @@ static int bq_fg_resume(struct device *dev)
 
 static void bq_fg_remove(struct i2c_client *client)
 {
-	printk("function name: %s\n", __func__);
 	struct bq_fg_chip *bq = i2c_get_clientdata(client);
 
 	cancel_delayed_work_sync(&bq->monitor_work);
 
-	fg_psy_unregister(bq);
-
 	mutex_destroy(&bq->data_lock);
 	mutex_destroy(&bq->i2c_rw_lock);
 	mutex_destroy(&bq->irq_complete);
-
-	sysfs_remove_group(&bq->dev->kobj, &fg_attr_group);
-
 }
 
 static void bq_fg_shutdown(struct i2c_client *client)
