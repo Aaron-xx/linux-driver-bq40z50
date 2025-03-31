@@ -1,7 +1,3 @@
-以下是适合你的 `README.md` 和 `.gitignore` 文件内容：  
-
-### `README.md`
-```markdown
 # bq40z50 Linux 驱动
 
 本仓库包含适用于 Linux 内核的 bq40z50 电池管理 IC 驱动代码。
@@ -50,8 +46,4 @@ echo "dtoverlay=bq40z50-overlay" | sudo tee -a /boot/config.txt
 ```sh
 chmod +x test.sh
 ./test.sh
-```
-
-## 许可证
-本项目基于 **GPLv2** 许可证，详情请查看 LICENSE 文件。
 ```

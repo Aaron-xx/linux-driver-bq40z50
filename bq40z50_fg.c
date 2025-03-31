@@ -32,51 +32,53 @@
 #define bq_err	pr_info
 #define bq_log	pr_err
 
+// 寄存器的无效地址定义（用于不支持的命令）
+#define INVALID_REG_ADDR       0xFF
 
-#define	INVALID_REG_ADDR	0xFF
+// --- 状态寄存器（0x16 Battery Status）标志位定义 ---
+#define FG_FLAGS_FD             BIT(4)   // Fully Discharged (完全耗尽状态)
+#define FG_FLAGS_FC             BIT(5)   // Fully Charged
+#define FG_FLAGS_DSG            BIT(6)   // Discharging or Relax
+#define FG_FLAGS_RCA            BIT(9)   // Remaining Capacity Alarm
 
-#define FG_FLAGS_FD				BIT(4)
-#define	FG_FLAGS_FC				BIT(5)
-#define	FG_FLAGS_DSG				BIT(6)
-#define FG_FLAGS_RCA				BIT(9)
-
-
+// --- 寄存器索引枚举（与地址映射对应）---
 enum bq_fg_reg_idx {
-	BQ_FG_REG_MAC = 0,
-	BQ_FG_REG_TEMP,		/* Battery Temperature */
-	BQ_FG_REG_VOLT,		/* Battery Voltage */
-	BQ_FG_REG_AI,		/* Average Current */
-	BQ_FG_REG_BATT_STATUS,	/* BatteryStatus */
-	BQ_FG_REG_TTE,		/* Time to Empty */
-	BQ_FG_REG_TTF,		/* Time to Full */
-	BQ_FG_REG_FCC,		/* Full Charge Capacity */
-	BQ_FG_REG_RM,		/* Remaining Capacity */
-	BQ_FG_REG_CC,		/* Cycle Count */
-	BQ_FG_REG_SOC,		/* Relative State of Charge */
-	BQ_FG_REG_SOH,		/* State of Health */
-	BQ_FG_REG_DC,		/* Design Capacity */
-	BQ_FG_REG_MBA,		/* ManufacturerBlockAccess*/
+	BQ_FG_REG_MAC,			// ManufacturerAccess (控制命令接口)
+	BQ_FG_REG_TEMP,			// 电池温度 (单位：0.1°K，代码中有转换)
+	BQ_FG_REG_VOLT,			// 电池电压 (单位：mV)
+	BQ_FG_REG_AI,			// 平均电流 (单位：mA，有符号)
+	BQ_FG_REG_SOC,			// 相对电量百分比 (0~100%)
+	BQ_FG_REG_RM ,			// 剩余容量 (单位：mAh/10mWh)
+	BQ_FG_REG_FCC,			// 充满电容量 (Full Charge Capacity)
+	BQ_FG_REG_TTE,			// 完全放电预估时间 (分钟)
+	BQ_FG_REG_TTF,			// 充满电预估时间 (分钟)
+	BQ_FG_REG_BATT_STATUS,	// 电池状态字 (包含上述FC/FD/DSG/RCA等标志位)
+	BQ_FG_REG_CC,			// 循环次数计数器 (Cycle Count)
+	BQ_FG_REG_DC,			// 设计容量 (Design Capacity)
+	BQ_FG_REG_SOH,			// 电池健康度百分比 (State of Health)
+	BQ_FG_REG_MBA,			// ManufacturerBlockAccess (数据闪存块操作接口)
 	NUM_REGS,
 };
 
+// --- 制造商访问命令枚举 (通过BQ_FG_REG_MAC寄存器发送) ---
 enum bq_fg_mac_cmd {
-	FG_MAC_CMD_OP_STATUS	= 0x0000,
-	FG_MAC_CMD_DEV_TYPE	= 0x0001,
-	FG_MAC_CMD_FW_VER	= 0x0002,
-	FG_MAC_CMD_HW_VER	= 0x0003,
-	FG_MAC_CMD_IF_SIG	= 0x0004,
-	FG_MAC_CMD_CHEM_ID	= 0x0006,
-	FG_MAC_CMD_GAUGING	= 0x0021,
-	FG_MAC_CMD_SEAL		= 0x0030,
-	FG_MAC_CMD_DEV_RESET	= 0x0041,
+	FG_MAC_CMD_OP_STATUS    = 0x0000, // 读取操作状态字
+	FG_MAC_CMD_DEV_TYPE     = 0x0001, // 获取设备类型标识
+	FG_MAC_CMD_FW_VER       = 0x0002, // 读取固件版本（如代码中的FW Ver/Ztrack Ver）
+	FG_MAC_CMD_HW_VER       = 0x0003, // 硬件版本号
+	FG_MAC_CMD_IF_SIG       = 0x0004, // 接口签名验证
+	FG_MAC_CMD_CHEM_ID      = 0x0006, // 读取电池化学ID (用于阻抗匹配)
+	FG_MAC_CMD_GAUGING      = 0x0021,  // 进入校准模式（如Qmax更新）
+	FG_MAC_CMD_SEAL         = 0x0030, // SEAL/UNSEAL设备（安全权限控制）
+	FG_MAC_CMD_DEV_RESET    = 0x0041, // 复位设备（需UNSEAL权限）
 };
 
-
+// --- 设备安全密封状态枚举 ---
 enum {
-	SEAL_STATE_RSVED,
-	SEAL_STATE_UNSEALED,
-	SEAL_STATE_SEALED,
-	SEAL_STATE_FA,
+	SEAL_STATE_RSVED,      // 保留状态（未使用状态）
+	SEAL_STATE_FA,         // Full Access（已验证安全密钥，最高权限）
+	SEAL_STATE_UNSEALED,   // 未密封状态（允许写操作）
+	SEAL_STATE_SEALED,     // 已密封（禁止写敏感寄存器）
 };
 
 
@@ -89,20 +91,20 @@ static const unsigned char *device2str[] = {
 };
 
 static u8 bq40z50_regs[NUM_REGS] = {
-	0x00,	/* CONTROL */
-	0x08,	/* TEMP */
-	0x09,	/* VOLT */
-	0x0B,	/* AVG CURRENT */
-	0x16,	/* FLAGS */
-	0x12,	/* Time to empty */
-	0x13,	/* Time to full */
-	0x10,	/* Full charge capacity */
-	0x0F,	/* Remaining Capacity */
-	0x17,	/* CycleCount */
-	0x0D,	/* State of Charge */
-	0x4F,	/* State of Health */
-	0x18,	/* Design Capacity */
-	0x44,	/* ManufacturerBlockAccess*/
+	0x00,  // ManufacturerAccess (控制命令接口)
+	0x08,  // 电池温度 (单位：0.1°K，代码中有转换)
+	0x09,  // 电池电压 (单位：mV)
+	0x0B,  // 平均电流 (单位：mA，有符号)
+	0x0D,  // 相对电量百分比 (0~100%)
+	0x0F,  // 剩余容量 (单位：mAh/10mWh)
+	0x10,  // 充满电容量 (Full Charge Capacity)
+	0x12,  // 完全放电预估时间 (分钟)
+	0x13,  // 充满电预估时间 (分钟)
+	0x16,  // 电池状态字 (包含上述FC/FD/DSG/RCA等标志位)
+	0x17,  // 循环次数计数器 (Cycle Count)
+	0x18,  // 设计容量 (Design Capacity)
+	0x4F,  // 电池健康度百分比 (State of Health)
+	0x44,  // ManufacturerBlockAccess (数据闪存块操作接口)
 };
 
 struct bq_fg_chip {
@@ -934,7 +936,7 @@ static int bq_fg_probe(struct i2c_client *client)
 
 	bq->dev = &client->dev;
 	bq->client = client;
-	bq->chip =  BQ40Z50;
+	bq->chip =  i2c_match_id(bq_fg_idtable, client)->driver_data;
 
 	bq->batt_soc    = -ENODATA;
 	bq->batt_fcc    = -ENODATA;
@@ -1081,7 +1083,7 @@ static struct of_device_id bq_fg_match_table[] = {
 };
 MODULE_DEVICE_TABLE(of, bq_fg_match_table);
 
-static const struct i2c_device_id bq_fg_id[] = {
+static const struct i2c_device_id bq_fg_idtable[] = {
 	{ "bq40z50", BQ40Z50 },
 	{},
 };
