@@ -426,9 +426,9 @@ static int fg_read_temperature(struct bq_fg_chip *bq)
 		bq_err("could not read temperature, ret = %d\n", ret);
 		return ret;
 	}
+	bq_log("temperture: %d\n", temp - 2731);
 
-	return temp - 2730;
-
+	return temp - 2731;
 }
 
 static int fg_read_volt(struct bq_fg_chip *bq)
@@ -866,6 +866,7 @@ static const struct attribute_group fg_attr_group = {
 
 static void fg_dump_registers(struct bq_fg_chip *bq)
 {
+#if 0
 	int i;
 	int ret;
 	u16 val;
@@ -876,6 +877,7 @@ static void fg_dump_registers(struct bq_fg_chip *bq)
 		if (!ret)
 			bq_log("Reg[%02X] = 0x%04X\n", fg_dump_regs[i], val);
 	}
+#endif
 }
 
 static irqreturn_t fg_btp_irq_thread(int irq, void *dev_id)
@@ -923,6 +925,20 @@ static void determine_initial_status(struct bq_fg_chip *bq)
 	fg_btp_irq_thread(bq->client->irq, bq);
 }
 
+
+static struct of_device_id bq_fg_match_table[] = {
+	{.compatible = "ti,bq40z50",},
+	{},
+};
+MODULE_DEVICE_TABLE(of, bq_fg_match_table);
+
+static const struct i2c_device_id bq_fg_id[] = {
+	{ "bq40z50", BQ40Z50 },
+	{},
+};
+MODULE_DEVICE_TABLE(i2c, bq_fg_id);
+
+
 static int bq_fg_probe(struct i2c_client *client)
 {
 	int ret;
@@ -936,7 +952,7 @@ static int bq_fg_probe(struct i2c_client *client)
 
 	bq->dev = &client->dev;
 	bq->client = client;
-	bq->chip =  i2c_match_id(bq_fg_idtable, client)->driver_data;
+	bq->chip =  i2c_match_id(bq_fg_id, client)->driver_data;
 
 	bq->batt_soc    = -ENODATA;
 	bq->batt_fcc    = -ENODATA;
@@ -1076,18 +1092,6 @@ static void bq_fg_shutdown(struct i2c_client *client)
 {
 	pr_info("bq fuel gauge driver shutdown!\n");
 }
-
-static struct of_device_id bq_fg_match_table[] = {
-	{.compatible = "ti,bq40z50",},
-	{},
-};
-MODULE_DEVICE_TABLE(of, bq_fg_match_table);
-
-static const struct i2c_device_id bq_fg_idtable[] = {
-	{ "bq40z50", BQ40Z50 },
-	{},
-};
-MODULE_DEVICE_TABLE(i2c, bq_fg_id);
 
 static const struct dev_pm_ops bq_fg_pm_ops = {
 	.resume		= bq_fg_resume,
