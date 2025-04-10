@@ -41,6 +41,9 @@
 #define FG_FLAGS_DSG            BIT(6)   // Discharging or Relax
 #define FG_FLAGS_RCA            BIT(9)   // Remaining Capacity Alarm
 
+//#define FG_MAC_CMD_MANUFACTURE_STATUS    0x0057  // 获取制造状态
+//#define FG_MAC_CMD_FET_CONTROL           0x0058  // FET控制命令
+
 // --- 寄存器索引枚举（与地址映射对应）---
 enum bq_fg_reg_idx {
 	BQ_FG_REG_MAC,			// ManufacturerAccess (控制命令接口)
@@ -57,6 +60,8 @@ enum bq_fg_reg_idx {
 	BQ_FG_REG_DC,			// 设计容量 (Design Capacity)
 	BQ_FG_REG_SOH,			// 电池健康度百分比 (State of Health)
 	BQ_FG_REG_MBA,			// ManufacturerBlockAccess (数据闪存块操作接口)
+	FG_MAC_CMD_MANUFACTURE_STATUS,
+	FG_MAC_CMD_FET_CONTROL,
 	NUM_REGS,
 };
 
@@ -69,6 +74,7 @@ enum bq_fg_mac_cmd {
 	FG_MAC_CMD_IF_SIG       = 0x0004, // 接口签名验证
 	FG_MAC_CMD_CHEM_ID      = 0x0006, // 读取电池化学ID (用于阻抗匹配)
 	FG_MAC_CMD_GAUGING      = 0x0021,  // 进入校准模式（如Qmax更新）
+	FG_MAC_CMD_FET_EN       = 0x0022, // 进入校准模式（如Qmax更新）
 	FG_MAC_CMD_SEAL         = 0x0030, // SEAL/UNSEAL设备（安全权限控制）
 	FG_MAC_CMD_DEV_RESET    = 0x0041, // 复位设备（需UNSEAL权限）
 };
@@ -105,12 +111,17 @@ static u8 bq40z50_regs[NUM_REGS] = {
 	0x18,  // 设计容量 (Design Capacity)
 	0x4F,  // 电池健康度百分比 (State of Health)
 	0x44,  // ManufacturerBlockAccess (数据闪存块操作接口)
+	0x57,
+	0x58,
 };
 
 struct bq_fg_chip {
 	struct device *dev;
 	struct i2c_client *client;
 
+	bool fet_enabled;
+	bool chg_test;
+	bool dsg_test;
 
 	struct mutex i2c_rw_lock;
 	struct mutex data_lock;
@@ -281,7 +292,7 @@ static u8 checksum(u8 *data, u8 len)
 	return 0xFF - sum;
 }
 
-#if 0
+#if 1
 static void fg_print_buf(const char *msg, u8 *buf, u8 len)
 {
 	int i;
@@ -329,7 +340,6 @@ static int fg_mac_read_block(struct bq_fg_chip *bq, u16 cmd, u8 *buf, u8 len)
 	return 0;
 }
 
-#if 0
 static int fg_mac_write_block(struct bq_fg_chip *bq, u16 cmd, u8 *data, u8 len)
 {
 	int ret;
@@ -352,7 +362,6 @@ static int fg_mac_write_block(struct bq_fg_chip *bq, u16 cmd, u8 *data, u8 len)
 
 	return ret;
 }
-#endif
 
 static void fg_read_fw_version(struct bq_fg_chip *bq)
 {
@@ -850,12 +859,129 @@ static ssize_t fg_attr_show_Qmax(struct device *dev,
 	return idx;
 }
 
+// 读取FET状态
+static int fg_read_fet_status(struct bq_fg_chip *bq)
+{
+	int ret;
+	u8 buf[36];
+
+	ret = fg_read_block(bq, bq->regs[FG_MAC_CMD_MANUFACTURE_STATUS], buf, 32);
+	if (ret < 0) {
+		bq_err("Failed to read FET status:%d ", ret);
+		return ret;
+	}
+
+	bq->fet_enabled = !!(buf[0] & BIT(4));
+	bq->chg_test = !!(buf[0] & BIT(1));
+	bq->dsg_test = !!(buf[0] & BIT(2));
+
+//	for(int i=0;i<32;i++)
+//		bq_log("buf[%d]=%d ", buf[i]);
+	//bq_log("FET_EN: %d, CHG_TEST: %d, DSG_TEST: %d\n", 
+	//		bq->fet_enabled, bq->chg_test, bq->dsg_test);
+
+	return 0;
+}
+
+// 设置FET状态
+static int fg_set_fet_status(struct bq_fg_chip *bq)
+{
+	int ret;
+	u8 buf[36] = {0};
+
+	// 首先读取当前状态
+	ret = fg_read_fet_status(bq);
+	if (ret < 0)
+		return ret;
+
+	// 应用逻辑: if [FET_EN]=1 then [FET_EN]=0 elseif [CHG_TEST]=0 and [DSG_TEST]=0 then [CHG_TEST]=1 and [DSG_TEST]=1
+	if (bq->fet_enabled) {
+		bq->fet_enabled = false;
+	} 
+
+	if (!bq->chg_test && !bq->dsg_test) {
+		bq->chg_test = true;
+		bq->dsg_test = true;
+	}
+
+	buf[0] = (u8)(FG_MAC_CMD_FET_CONTROL >> 8);
+	buf[1] = (u8)FG_MAC_CMD_FET_CONTROL ;
+	//buf[0] = (u8)(FG_MAC_CMD_FET_EN >> 8);
+	//buf[1] = (u8)FG_MAC_CMD_FET_EN && 0xFF;
+
+	// 设置相应的位
+	if (bq->fet_enabled)
+		buf[0] |= BIT(4);
+	if (bq->chg_test)
+		buf[0] |= BIT(1);
+	if (bq->dsg_test)
+		buf[0] |= BIT(2);
+	bq_log("bit: %d\n", buf[0]);
+	u16 cmd = FG_MAC_CMD_FET_CONTROL << 8 | 0x06;
+	//ret = fg_write_word(bq, bq->regs[BQ_FG_REG_MBA], cmd);
+	ret = fg_mac_write_block(bq, bq->regs[FG_MAC_CMD_FET_CONTROL], buf, 3);
+	if (ret < 0) {
+		bq_err("Failed to write FET control:%d\n", ret);
+		return ret;
+	}
+
+	mdelay(2);
+
+	ret = fg_mac_read_block(bq, bq->regs[FG_MAC_CMD_FET_CONTROL], buf, 32);
+	if (ret < 0) {
+		bq_err("Failed to read FET control:%d\n", ret);
+		return ret;
+	}
+
+	bq_log("read: %d  %d  %d \n", buf[0], buf[1], buf[2]);
+
+	bq_log("FET control updated: FET_EN: %d, CHG_TEST: %d, DSG_TEST: %d\n", 
+		bq->fet_enabled, bq->chg_test, bq->dsg_test);
+
+	return 0;
+}
+
+// 添加到sysfs接口
+static ssize_t fg_attr_show_fet_status(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct bq_fg_chip *bq = i2c_get_clientdata(client);
+	int ret;
+
+	ret = fg_read_fet_status(bq);
+	if (ret < 0)
+		return ret;
+
+	return sprintf(buf, "FET_EN:%d CHG_TEST:%d DSG_TEST:%d\n", 
+			bq->fet_enabled, bq->chg_test, bq->dsg_test);
+}
+
+static ssize_t fg_attr_store_fet_control(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct bq_fg_chip *bq = i2c_get_clientdata(client);
+	int ret;
+
+	// 触发FET控制逻辑
+	ret = fg_set_fet_status(bq);
+	if (ret < 0)
+		return ret;
+
+	return count;
+}
+
 static DEVICE_ATTR(RaTable, S_IRUGO, fg_attr_show_Ra_table, NULL);
 static DEVICE_ATTR(Qmax, S_IRUGO, fg_attr_show_Qmax, NULL);
+static DEVICE_ATTR(fet_status, S_IRUGO, fg_attr_show_fet_status, NULL);
+static DEVICE_ATTR(fet_control, S_IWUSR, NULL, fg_attr_store_fet_control);
 
 static struct attribute *fg_attributes[] = {
 	&dev_attr_RaTable.attr,
 	&dev_attr_Qmax.attr,
+	&dev_attr_fet_status.attr,
+	&dev_attr_fet_control.attr,
 	NULL,
 };
 
@@ -910,9 +1036,9 @@ static void fg_monitor_workfunc(struct work_struct *work)
 {
 	struct bq_fg_chip *bq = container_of(work, struct bq_fg_chip, monitor_work.work);
 
-	fg_update_status(bq);
+	//fg_update_status(bq);
 
-	fg_dump_registers(bq);
+	//fg_dump_registers(bq);
 
 	schedule_delayed_work(&bq->monitor_work, 5 * HZ);
 }
@@ -920,7 +1046,7 @@ static void fg_monitor_workfunc(struct work_struct *work)
 
 static void determine_initial_status(struct bq_fg_chip *bq)
 {
-	fg_update_status(bq);
+	//fg_update_status(bq);
 
 	fg_btp_irq_thread(bq->client->irq, bq);
 }
@@ -1117,4 +1243,5 @@ module_i2c_driver(bq_fg_driver);
 MODULE_DESCRIPTION("TI BQ40Z50 Driver");
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Texas Instruments");
+
 
