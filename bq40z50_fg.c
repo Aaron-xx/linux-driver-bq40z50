@@ -819,7 +819,7 @@ static ssize_t fg_attr_store_fet_control(struct device *dev,
 	{
 		if(bq->recv_buf[0] & BIT(4))
 		{
-			fg_mac_trigger(bq, FG_MAC_CMD_FET_EN);
+			ret = fg_mac_trigger(bq, FG_MAC_CMD_FET_EN);
 			if (ret < 0) {
 				bq_err("Failed to toggle FET control:%d\n", ret);
 				return ret;
@@ -845,7 +845,7 @@ static ssize_t fg_attr_store_fet_control(struct device *dev,
 		}
 	}
 
-	return ret;
+	return ret ? ret : count;
 }
 
 static ssize_t fg_attr_show_mac_status(struct device *dev,
