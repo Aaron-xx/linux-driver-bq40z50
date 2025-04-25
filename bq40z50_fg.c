@@ -119,6 +119,8 @@ struct bq_fg_chip {
 	u8 recv_buf[40];
 	u8 send_buf[40];
 
+	u8 reg_addr;
+
 	struct mutex i2c_rw_lock;
 	struct mutex data_lock;
 	struct mutex irq_complete;
@@ -199,7 +201,7 @@ static int __fg_write_word(struct i2c_client *client, u8 reg, u16 val)
 	return 0;
 }
 
-static int __fg_read_block(struct i2c_client *client, u8 reg, u8 *buf, u8 len)
+static int __fg_read_block(struct i2c_client *client, u8 reg, u8 *buf)
 {
 
 	int ret;
@@ -251,14 +253,14 @@ static int fg_write_word(struct bq_fg_chip *bq, u8 reg, u16 val)
 }
 #endif
 
-static int fg_read_block(struct bq_fg_chip *bq, u8 reg, u8 *buf, u8 len)
+static int fg_read_block(struct bq_fg_chip *bq, u8 reg, u8 *buf)
 {
 	int ret;
 
 	if (bq->skip_reads)
 		return 0;
 	mutex_lock(&bq->i2c_rw_lock);
-	ret = __fg_read_block(bq->client, reg, buf, len);
+	ret = __fg_read_block(bq->client, reg, buf);
 	mutex_unlock(&bq->i2c_rw_lock);
 
 	return ret;
@@ -279,7 +281,7 @@ static int fg_write_block(struct bq_fg_chip *bq, u8 reg, u8 *data, u8 len)
 	return ret;
 }
 
-#if 1
+#if 0
 static void fg_print_buf(const char *msg, u8 *buf, u8 len)
 {
 	int i;
@@ -299,7 +301,7 @@ static void fg_print_buf(const char *msg, u8 *buf, u8 len)
 {}
 #endif
 
-static int fg_mac_read_block(struct bq_fg_chip *bq, u16 cmd, u8 *buf, u8 len)
+static int fg_mac_read_block(struct bq_fg_chip *bq, u16 cmd, u8 *buf)
 {
 	int ret = -1;
 	u8 t_buf[40] = {0};
@@ -315,7 +317,7 @@ static int fg_mac_read_block(struct bq_fg_chip *bq, u16 cmd, u8 *buf, u8 len)
 
 	msleep(10);
 
-	ret = fg_read_block(bq, bq->regs[BQ_FG_REG_MBA], t_buf, len + 2);
+	ret = fg_read_block(bq, bq->regs[BQ_FG_REG_MBA], t_buf);
 	if (ret < 0)
 		return ret;
 	t_len = ret;
@@ -372,7 +374,7 @@ static void fg_read_fw_version(struct bq_fg_chip *bq)
 	int ret;
 	u8 t_buf[36];
 
-	ret = fg_mac_read_block(bq, FG_MAC_CMD_FW_VER, t_buf, 11);
+	ret = fg_mac_read_block(bq, FG_MAC_CMD_FW_VER, t_buf);
 	if (ret < 0) {
 		bq_err("Failed to read firmware version:%d\n", ret);
 		return;
@@ -785,17 +787,32 @@ static void fg_psy_unregister(struct bq_fg_chip *bq)
 	power_supply_unregister(bq->fg_psy);
 }
 
-static int fg_read_mac_status(struct bq_fg_chip *bq) {
+static int fg_read_mac_status(struct bq_fg_chip *bq)
+{
 	int ret;
 	u8 *t_buf = bq->recv_buf;
 	
-	ret = fg_mac_read_block(bq, FG_MAC_CMD_MANUFACTURE_STATUS, t_buf, 4);
+	ret = fg_mac_read_block(bq, FG_MAC_CMD_MANUFACTURE_STATUS, t_buf);
 	if (ret < 0) {
 		bq_err("Failed to read FET status:%d", ret);
 		return ret;
 	}
 
-	return 0;
+	return ret;
+}
+
+static int fg_read_register_status(struct bq_fg_chip *bq, u8 reg)
+{
+	int ret;
+	u8 *t_buf = bq->recv_buf;
+	
+	ret = fg_mac_read_block(bq, reg, t_buf);
+	if (ret < 0) {
+		bq_err("Failed to read FET status:%d", ret);
+		return ret;
+	}
+
+	return ret;
 }
 
 static ssize_t fg_attr_store_fet_control(struct device *dev,
@@ -848,35 +865,65 @@ static ssize_t fg_attr_store_fet_control(struct device *dev,
 	return ret ? ret : count;
 }
 
-static ssize_t fg_attr_show_mac_status(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static ssize_t fg_attr_store_register_addr(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct bq_fg_chip *bq = i2c_get_clientdata(client);
-	u8 *recv_buf = bq->recv_buf;
-	int ret;
+	u8 reg_addr;
+	int value;
 
-	ret = fg_read_mac_status(bq);
-	if (ret < 0)
-		return ret;
-
-	return sprintf (buf, "\n \
-		[CALTS=%d][LT_TS=%d][ResD=%d][ResC=%d][ResB=%d ][ResA=%d][LED=%d][FUSE=%d]\n \
-		[BBR=%d  ][PF=%d   ][LF=%d  ][FET=%d ][GAUGE=%d][DSG=%d ][CHG=%d][PCHG=%d]\n",
-		!!(recv_buf[1] & BIT(7)), !!(recv_buf[1] & BIT(6)), !!(recv_buf[1] & BIT(5)), !!(recv_buf[1] & BIT(4)),
-		!!(recv_buf[1] & BIT(3)), !!(recv_buf[1] & BIT(2)), !!(recv_buf[1] & BIT(1)), !!(recv_buf[1] & BIT(0)),
-		!!(recv_buf[0] & BIT(7)), !!(recv_buf[0] & BIT(6)), !!(recv_buf[0] & BIT(5)), !!(recv_buf[0] & BIT(4)),
-		!!(recv_buf[0] & BIT(3)), !!(recv_buf[0] & BIT(2)), !!(recv_buf[0] & BIT(1)), !!(recv_buf[0] & BIT(0))
-	);
-
-	return ret;
+	if (sscanf(buf, "%x", &value) != 1)
+		return -EINVAL;
+	
+	reg_addr = (u8)value;
+	bq->reg_addr = reg_addr;
+	
+	return count;
 }
 
-static DEVICE_ATTR(mac_status, S_IRUGO, fg_attr_show_mac_status, NULL);
+static ssize_t fg_attr_show_register_addr(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct bq_fg_chip *bq = i2c_get_clientdata(client);
+
+    return sprintf(buf, "0x%02x\n", bq->reg_addr);
+}
+
+static ssize_t fg_attr_show_register_value(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct bq_fg_chip *bq = i2c_get_clientdata(client);
+	int count = 0, ret, i;
+
+	ret = fg_read_register_status(bq, bq->reg_addr);
+	if (ret <= 0) {
+		return sprintf(buf, "Read error or no data\n");
+	}
+
+	bq_log("Read register 0x%02X, ret = %d\n", bq->reg_addr, ret);
+
+	for (i = 0; i < ret; i++) {
+		count += sprintf(buf + count, "%02x", bq->recv_buf[i]);
+	}
+
+	if (count > 0) {
+		buf[count-1] = '\n';
+	}
+
+	return count;
+}
+
+static DEVICE_ATTR(register_addr, S_IRUGO | S_IWUSR, 
+	fg_attr_show_register_addr, fg_attr_store_register_addr);
+static DEVICE_ATTR(register_value, S_IRUGO, fg_attr_show_register_value, NULL);
 static DEVICE_ATTR(fet_control, 0644, NULL, fg_attr_store_fet_control);
 
 static struct attribute *fg_attributes[] = {
-	&dev_attr_mac_status.attr,
+	&dev_attr_register_addr.attr,
+	&dev_attr_register_value.attr,
 	&dev_attr_fet_control.attr,
 	NULL,
 };
@@ -971,6 +1018,7 @@ static int bq_fg_probe(struct i2c_client *client)
 	}
 
 	memcpy(bq->regs, regs, NUM_REGS);
+	bq->reg_addr	= FG_MAC_CMD_MANUFACTURE_STATUS;
 
 	i2c_set_clientdata(client, bq);
 
