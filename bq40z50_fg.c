@@ -754,8 +754,6 @@ static int fg_prop_is_writeable(struct power_supply *psy,
 	return ret;
 }
 
-
-
 static int fg_psy_register(struct bq_fg_chip *bq)
 {
 	struct power_supply_config fg_psy_cfg = {};
@@ -916,14 +914,38 @@ static ssize_t fg_attr_show_register_value(struct device *dev,
 	return count;
 }
 
+static ssize_t fg_attr_store_register_value(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct bq_fg_chip *bq = i2c_get_clientdata(client);
+	int ret, value;
+	u16 reg_addr;
+
+	if (sscanf(buf, "%x", &value) != 1)
+		return -EINVAL;
+	
+	reg_addr = (u16)value;
+
+	ret = fg_mac_trigger(bq, reg_addr);
+	if (ret < 0) {
+		bq_err("Failed to write register 0x%02X, ret = %d\n", bq->reg_addr, ret);
+		return ret;
+	}
+
+	return ret ? ret : count;
+}
+
 static DEVICE_ATTR(register_addr, S_IRUGO | S_IWUSR, 
 	fg_attr_show_register_addr, fg_attr_store_register_addr);
 static DEVICE_ATTR(register_value, S_IRUGO, fg_attr_show_register_value, NULL);
+static DEVICE_ATTR(set_register_value, 0644, NULL, fg_attr_store_register_value);
 static DEVICE_ATTR(fet_control, 0644, NULL, fg_attr_store_fet_control);
 
 static struct attribute *fg_attributes[] = {
 	&dev_attr_register_addr.attr,
 	&dev_attr_register_value.attr,
+	&dev_attr_set_register_value.attr,
 	&dev_attr_fet_control.attr,
 	NULL,
 };
