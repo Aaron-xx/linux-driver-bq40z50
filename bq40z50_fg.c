@@ -78,7 +78,6 @@ struct bq40z50_device {
 	struct	delayed_work monitor_work;
 
 	struct power_supply		*charger;
-	struct power_supply		*battery;
 };
 
 enum bq_fg_device {
@@ -89,126 +88,44 @@ static const unsigned char *device2str[] = {
 	"bq40z50",
 };
 
-static int __fg_read_word(struct i2c_client *client, u8 reg, u16 *val)
-{
-	s32 ret;
-
-	ret = i2c_smbus_read_word_data(client, reg);
-	if (ret < 0) {
-		bq_err("i2c read word fail: can't read from reg 0x%02X\n", reg);
-		return ret;
-	}
-
-	*val = (u16)ret;
-
-	return 0;
-}
-
-static int __fg_write_word(struct i2c_client *client, u8 reg, u16 val)
-{
-	s32 ret;
-
-	bq_log("__fg_write_word: reg=0x%02X, val=0x%02X\n", reg, val);
-
-	ret = i2c_smbus_write_word_data(client, reg, val);
-	if (ret < 0) {
-		bq_err("i2c write word fail: can't write 0x%02X to reg 0x%02X\n",
-				val, reg);
-		return ret;
-	}
-
-	return 0;
-}
-
-static int __fg_read_block(struct i2c_client *client, u8 reg, u8 *buf)
-{
-
-	int ret;
-
-	/* len is ignored due to smbus block reading contains Num of bytes to be returned */
-	ret = i2c_smbus_read_block_data(client, reg, buf);
-
-	return ret;
-}
-
-static int __fg_write_block(struct i2c_client *client, u8 reg, u8 *buf, u8 len)
-{
-	int ret;
-
-	ret = i2c_smbus_write_block_data(client, reg, len, buf);
-
-	return ret;
-}
-
 static int fg_read_word(struct bq40z50_device *bq, u8 reg, u16 *val)
 {
 	int ret;
 
 	mutex_lock(&bq->i2c_rw_lock);
-	ret = __fg_read_word(bq->client, reg, val);
+	ret = i2c_smbus_read_word_data(bq->client, reg);
+	if (ret < 0) {
+		bq_err("i2c read word fail: can't read from reg 0x%02X\n", reg);
+		return ret;
+	}
+	*val = (u16)ret;
+
 	mutex_unlock(&bq->i2c_rw_lock);
 
 	return ret;
 }
-
-#if 0
-static int fg_write_word(struct bq40z50_device *bq, u8 reg, u16 val)
-{
-	int ret;
-
-	if (bq->skip_writes)
-		return 0;
-
-	mutex_lock(&bq->i2c_rw_lock);
-	ret = __fg_write_word(bq->client, reg, val);
-	mutex_unlock(&bq->i2c_rw_lock);
-
-	return ret;
-}
-#endif
 
 static int fg_read_block(struct bq40z50_device *bq, u8 reg, u8 *buf)
 {
 	int ret;
 
 	mutex_lock(&bq->i2c_rw_lock);
-	ret = __fg_read_block(bq->client, reg, buf);
+	ret = i2c_smbus_read_block_data(bq->client, reg, buf);
 	mutex_unlock(&bq->i2c_rw_lock);
 
 	return ret;
-
 }
 
-static int fg_write_block(struct bq40z50_device *bq, u8 reg, u8 *data, u8 len)
+static int fg_write_block(struct bq40z50_device *bq, u8 reg, u8 *buf, u8 len)
 {
 	int ret;
 
 	mutex_lock(&bq->i2c_rw_lock);
-	ret = __fg_write_block(bq->client, reg, data, len);
+	ret = i2c_smbus_write_block_data(bq->client, reg, len, buf);
 	mutex_unlock(&bq->i2c_rw_lock);
 
 	return ret;
 }
-
-#if 0
-static void fg_print_buf(const char *msg, u8 *buf, u8 len)
-{
-	int i;
-	int idx = 0;
-	int num;
-	u8 strbuf[128];
-
-	bq_err("%s buf: ", msg);
-	for (i = 0; i < len; i++) {
-		num = sprintf(&strbuf[idx], "%02X ", buf[i]);
-		idx += num;
-	}
-	bq_err("%s\n", strbuf);
-}
-#else
-static void fg_print_buf(const char *msg, u8 *buf, u8 len)
-{}
-#endif
 
 static int fg_mac_read_block(struct bq40z50_device *bq, u16 cmd, u8 *buf)
 {
@@ -230,39 +147,12 @@ static int fg_mac_read_block(struct bq40z50_device *bq, u16 cmd, u8 *buf)
 	if (ret < 0)
 		return ret;
 	t_len = ret;
-	/* ret contains number of data bytes in gauge's response*/
-	fg_print_buf("mac_read_block", t_buf, t_len);
 
 	for (i = 0; i < t_len - 2; i++)
 		buf[i] = t_buf[i+2];
 
 	return ret;
 }
-
-#if 0
-static int fg_mac_write_block(struct bq40z50_device *bq, u16 cmd, u8 *data, u8 len)
-{
-	int ret;
-	u8 t_buf[40];
-	int i;
-
-	if (len > 32)
-		return -1;
-
-	t_buf[0] = (u8)cmd;
-	t_buf[1] = (u8)(cmd >> 8);
-
-	for (i = 0; i < len; i++)
-		t_buf[i+2] = data[i];
-
-	/*write command/addr, data*/
-	ret = fg_write_block(bq, BQ40Z50_CMD_MANUFACTURER_BLOCK_ACCESS, t_buf, len + 2);
-	if (ret < 0)
-		return ret;
-
-	return ret;
-}
-#endif
 
 static int fg_mac_trigger(struct bq40z50_device *bq, u16 cmd)
 {
@@ -439,7 +329,7 @@ static int fg_read_tte(struct bq40z50_device *bq)
 		return ret;
 	}
 
-	if (ret == 0xFFFF)
+	if (tte == 0xFFFF)
 		return -ENODATA;
 
 	return tte;
@@ -476,9 +366,6 @@ static int fg_get_batt_capacity_level(struct bq40z50_device *bq)
 static enum power_supply_property bq40z50_power_supply_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
-};
-
-static enum power_supply_property bq40z50_battery_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
@@ -610,7 +497,7 @@ static int bq40z50_set_property(struct power_supply *psy,
 			break;
 		case POWER_SUPPLY_PROP_CAPACITY:
 			bq->fake_soc = val->intval;
-			power_supply_changed(bq->battery);
+			power_supply_changed(bq->charger);
 			break;
 		default:
 			return -EINVAL;
@@ -646,19 +533,8 @@ static const struct power_supply_desc bq40z50_power_supply_desc = {
 	.property_is_writeable = bq40z50_property_is_writeable,
 };
 
-static const struct power_supply_desc bq40z50_battery_desc = {
-	.name = "bq40z50-battery",
-	.type = POWER_SUPPLY_TYPE_BATTERY,
-	.properties = bq40z50_battery_props,
-	.num_properties = ARRAY_SIZE(bq40z50_battery_props),
-	.get_property = bq40z50_get_property,
-	.set_property = bq40z50_set_property,
-	.property_is_writeable = bq40z50_property_is_writeable,
-};
-
 static void fg_psy_unregister(struct bq40z50_device *bq)
 {
-	power_supply_unregister(bq->battery);
 	power_supply_unregister(bq->charger);
 }
 
@@ -860,7 +736,7 @@ static void fg_monitor_workfunc(struct work_struct *work)
 
 	fg_update_status(bq);
 
-	schedule_delayed_work(&bq->monitor_work, 5 * HZ);
+	// schedule_delayed_work(&bq->monitor_work, 5 * HZ);
 }
 
 static void determine_initial_status(struct bq40z50_device *bq)
@@ -895,12 +771,6 @@ static int bq40z50_power_supply_init(struct bq40z50_device *bq,
 						&bq40z50_power_supply_desc,
 						&psy_cfg);
 	if (IS_ERR(bq->charger))
-	return -EINVAL;
-
-	bq->battery = devm_power_supply_register(bq->dev,
-						&bq40z50_battery_desc,
-						&psy_cfg);
-	if (IS_ERR(bq->battery))
 	return -EINVAL;
 
 	return 0;
@@ -970,56 +840,10 @@ static int bq_fg_probe(struct i2c_client *client)
 	determine_initial_status(bq);
 
 	INIT_DELAYED_WORK(&bq->monitor_work, fg_monitor_workfunc);
-	// schedule_delayed_work(&bq->monitor_work, 5 * HZ);
+	schedule_delayed_work(&bq->monitor_work, 5 * HZ);
 
 	bq_log("bq fuel gauge probe successfully, %s\n",
 			device2str[bq->chip]);
-
-	return 0;
-}
-
-static inline bool is_device_suspended(struct bq40z50_device *bq)
-{
-	return !bq->resume_completed;
-}
-
-static int bq_fg_suspend(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct bq40z50_device *bq = i2c_get_clientdata(client);
-
-	
-	bq->resume_completed = false;
-	
-
-	return 0;
-}
-
-static int bq_fg_suspend_noirq(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct bq40z50_device *bq = i2c_get_clientdata(client);
-
-	if (bq->irq_waiting) {
-		pr_err_ratelimited("Aborting suspend, an interrupt was detected while suspending\n");
-		return -EBUSY;
-	}
-	return 0;
-
-}
-
-static int bq_fg_resume(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct bq40z50_device *bq = i2c_get_clientdata(client);
-
-	bq->resume_completed = true;
-	if (bq->irq_waiting) {
-		bq->irq_disabled = false;
-		enable_irq(client->irq);
-		fg_btp_irq_thread(client->irq, bq);
-	}
-	power_supply_changed(bq->battery);
 
 	return 0;
 }
@@ -1031,6 +855,7 @@ static void bq_fg_remove(struct i2c_client *client)
 	cancel_delayed_work_sync(&bq->monitor_work);
 	mutex_destroy(&bq->lock);
 	mutex_destroy(&bq->i2c_rw_lock);
+	fg_psy_unregister(bq);
 }
 
 static void bq_fg_shutdown(struct i2c_client *client)
@@ -1038,18 +863,11 @@ static void bq_fg_shutdown(struct i2c_client *client)
 	pr_info("bq fuel gauge driver shutdown!\n");
 }
 
-static const struct dev_pm_ops bq_fg_pm_ops = {
-	.resume		= bq_fg_resume,
-	.suspend_noirq = bq_fg_suspend_noirq,
-	.suspend	= bq_fg_suspend,
-};
-
 static struct i2c_driver bq_fg_driver = {
 	.driver = {
 		.name   = "bq40z50",
 		.owner  = THIS_MODULE,
 		.of_match_table = bq_fg_match_table,
-		.pm     = &bq_fg_pm_ops,
 	},
 	.probe    = bq_fg_probe,
 	.remove   = bq_fg_remove,
