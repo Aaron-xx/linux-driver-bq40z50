@@ -162,6 +162,6 @@
 #define BQ40Z50_BATT_STATUS_EC_RESERVED_COMMAND      0x2      /* Reserved Command */
 #define BQ40Z50_BATT_STATUS_EC_UNSUPPORTED_COMMAND   0x3      /* Unsupported Command */
 #define BQ40Z50_BATT_STATUS_EC_ACCESS_DENIED         0x4      /* AccessDenied */
-#define BQ40Z50_BATT_STATUS_EC_OVERFLOW_UNDERFLOW    0x5      /* Overflow/Underflow */   
+#define BQ40Z50_BATT_STATUS_EC_OVERFLOW_UNDERFLOW    0x5      /* Overflow/Underflow */
 
 #endif /* BQ40Z50 */

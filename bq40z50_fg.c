@@ -30,9 +30,37 @@
 
 #include "bq40z50_fg.h"
 
+struct bq40z50_battery_status {
+    int seal_state; /* 0 - Full Access, 1 - Unsealed, 2 - Sealed */
+
+	bool full_charged;
+	bool full_discharged;
+	bool discharging;
+	bool remaining_capacity_alarm;
+
+    int firmware_version;
+	int time_to_empty;
+	int reletive_state_of_charge;
+	int full_charge_capacity;
+	int remaining_capacity;
+	int design_capacity;
+	int voltage;
+	int temperature;
+	int curr;
+	int cycle_count;
+
+	int temp_state_of_charge;
+	int temp_temperature;
+};
+
 struct bq40z50_device {
 	struct i2c_client *client;
 	struct device *dev;
+	u8 chip;
+
+	struct power_supply *charger;
+
+	struct bq40z50_battery_status battery_status;
 
 	u8 recv_buf[40];
 	u8 send_buf[40];
@@ -43,41 +71,9 @@ struct bq40z50_device {
 	struct mutex lock;
 
 	bool irq_waiting;
-	bool irq_disabled;
 	bool resume_completed;
 
-	int fw_ver;
-	int df_ver;
-
-	u8 chip;
-	u8 regs;
-
-	/* status tracking */
-
-	bool batt_fc;
-	bool batt_fd;	/* full depleted */
-
-	bool batt_dsg;
-	bool batt_rca;	/* remaining capacity alarm */
-
-	int seal_state; /* 0 - Full Access, 1 - Unsealed, 2 - Sealed */
-	int batt_tte;
-	int batt_soc;
-	int batt_fcc;	/* Full charge capacity */
-	int batt_rm;	/* Remaining capacity */
-	int batt_dc;	/* Design Capacity */
-	int batt_volt;
-	int batt_temp;
-	int batt_curr;
-
-	int batt_cyclecnt;	/* cycle count */
-
-	int fake_soc;
-	int fake_temp;
-
 	struct	delayed_work monitor_work;
-
-	struct power_supply		*charger;
 };
 
 enum bq_fg_device {
@@ -195,116 +191,112 @@ static int fg_read_status(struct bq40z50_device *bq)
 	if (ret < 0)
 		return ret;
 
-	mutex_lock(&bq->lock);
-	bq->batt_fc		= !!(flags & BQ40Z50_BATT_STATUS_FULLY_CHARGED);
-	bq->batt_fd		= !!(flags & BQ40Z50_BATT_STATUS_FULLY_DISCHARGED);
-	bq->batt_rca	= !!(flags & BQ40Z50_BATT_STATUS_RCA);
-	bq->batt_dsg	= !!(flags & BQ40Z50_BATT_STATUS_DSG);
-	mutex_unlock(&bq->lock);
+	bq->battery_status.full_charged		= !!(flags & BQ40Z50_BATT_STATUS_FULLY_CHARGED);
+	bq->battery_status.full_discharged		= !!(flags & BQ40Z50_BATT_STATUS_FULLY_DISCHARGED);
+	bq->battery_status.remaining_capacity_alarm	= !!(flags & BQ40Z50_BATT_STATUS_RCA);
+	bq->battery_status.discharging	= !!(flags & BQ40Z50_BATT_STATUS_DSG);
 
 	return 0;
 }
 
-static int fg_read_rsoc(struct bq40z50_device *bq)
+static int fg_read_reletive_state_of_charge(struct bq40z50_device *bq)
 {
 	int ret;
-	u16 soc = 0;
+	u16 reletive_state_of_charge = 0;
 
-	ret = fg_read_word(bq, BQ40Z50_CMD_ABSOLUTE_STATE_OF_CHARGE, &soc);
+	ret = fg_read_word(bq, BQ40Z50_CMD_ABSOLUTE_STATE_OF_CHARGE, &reletive_state_of_charge);
 	if (ret < 0) {
 		bq_err("could not read RSOC, ret = %d\n", ret);
 		return ret;
 	}
 
-	return soc;
+	return reletive_state_of_charge;
 }
 
 static int fg_read_temperature(struct bq40z50_device *bq)
 {
 	int ret;
-	u16 temp = 0;
+	u16 temperature = 0;
 
-	ret = fg_read_word(bq, BQ40Z50_CMD_TEMPERATURE, &temp);
+	ret = fg_read_word(bq, BQ40Z50_CMD_TEMPERATURE, &temperature);
 	if (ret < 0) {
 		bq_err("could not read temperature, ret = %d\n", ret);
 		return ret;
 	}
 
-	return temp - 2731;
+	return temperature - 2731;
 }
 
-static int fg_read_volt(struct bq40z50_device *bq)
+static int fg_read_voltage(struct bq40z50_device *bq)
 {
 	int ret;
-	u16 volt = 0;
+	u16 voltage = 0;
 
-	ret = fg_read_word(bq, BQ40Z50_CMD_VOLTAGE, &volt);
+	ret = fg_read_word(bq, BQ40Z50_CMD_VOLTAGE, &voltage);
 	if (ret < 0) {
 		bq_err("could not read voltage, ret = %d\n", ret);
 		return ret;
 	}
 
-	return volt;
-
+	return voltage * 1000;
 }
 
-static int fg_read_current(struct bq40z50_device *bq, int *curr)
+static int fg_read_current(struct bq40z50_device *bq)
 {
 	int ret;
-	u16 avg_curr = 0;
+	u16 curr = 0;
 
-	ret = fg_read_word(bq, BQ40Z50_CMD_CURRENT, &avg_curr);
+	ret = fg_read_word(bq, BQ40Z50_CMD_CURRENT, &curr);
 	if (ret < 0) {
 		bq_err("could not read current, ret = %d\n", ret);
 		return ret;
 	}
-	*curr = (int)((s16)avg_curr);
 
-	return ret;
+	return (int)curr * 1000;
 }
 
-static int fg_read_fcc(struct bq40z50_device *bq)
+static int fg_read_full_charge_capacity(struct bq40z50_device *bq)
 {
 	int ret;
-	u16 fcc;
+	u16 full_charge_capacity;
 
-	ret = fg_read_word(bq, BQ40Z50_CMD_FULL_CHARGE_CAPACITY, &fcc);
+	ret = fg_read_word(bq, BQ40Z50_CMD_FULL_CHARGE_CAPACITY, &full_charge_capacity);
 	if (ret < 0)
 		bq_err("could not read FCC, ret=%d\n", ret);
 
-	return fcc;
+	return full_charge_capacity * 1000;
 }
 
-static int fg_read_dc(struct bq40z50_device *bq)
+static int fg_read_discharging(struct bq40z50_device *bq)
 {
 
 	int ret;
-	u16 dc;
+	u16 design_capacity;
 
-	ret = fg_read_word(bq, BQ40Z50_CMD_DESIGN_CAPACITY, &dc);
+	ret = fg_read_word(bq, BQ40Z50_CMD_DESIGN_CAPACITY, &design_capacity);
 	if (ret < 0) {
 		bq_err("could not read DC, ret=%d\n", ret);
 		return ret;
 	}
 
-	return dc;
+	return design_capacity * 1000;
 }
 
-static int fg_read_rm(struct bq40z50_device *bq)
+static int fg_read_remaining_capacity(struct bq40z50_device *bq)
 {
 	int ret;
-	u16 rm;
+	u16 remaining_capacity;
 
-	ret = fg_read_word(bq, BQ40Z50_CMD_REMAINING_CAPACITY, &rm);
+	ret = fg_read_word(bq, BQ40Z50_CMD_REMAINING_CAPACITY, &remaining_capacity);
 	if (ret < 0) {
 		bq_err("could not read DC, ret=%d\n", ret);
 		return ret;
 	}
 
-	return rm;
+	return remaining_capacity;
 }
 
-static int fg_read_cyclecount(struct bq40z50_device *bq)
+static int fg_read_cycle_count(struct bq40z50_device *bq)
 {
 	int ret;
 	u16 cc;
@@ -340,11 +332,11 @@ static int fg_get_batt_status(struct bq40z50_device *bq)
 
 	fg_read_status(bq);
 
-	if (bq->batt_fc)
+	if (bq->battery_status.full_charged)
 		return POWER_SUPPLY_STATUS_FULL;
-	else if (bq->batt_dsg)
+	else if (bq->battery_status.discharging)
 		return POWER_SUPPLY_STATUS_DISCHARGING;
-	else if (bq->batt_curr > 0)
+	else if (bq->battery_status.curr > 0)
 		return POWER_SUPPLY_STATUS_CHARGING;
 	else
 		return POWER_SUPPLY_STATUS_NOT_CHARGING;
@@ -353,11 +345,11 @@ static int fg_get_batt_status(struct bq40z50_device *bq)
 
 static int fg_get_batt_capacity_level(struct bq40z50_device *bq)
 {
-	if (bq->batt_fc)
+	if (bq->battery_status.full_charged)
 		return POWER_SUPPLY_CAPACITY_LEVEL_FULL;
-	else if (bq->batt_rca)
+	else if (bq->battery_status.remaining_capacity_alarm)
 		return POWER_SUPPLY_CAPACITY_LEVEL_LOW;
-	else if (bq->batt_fd)
+	else if (bq->battery_status.full_discharged)
 		return POWER_SUPPLY_CAPACITY_LEVEL_CRITICAL;
 	else
 		return POWER_SUPPLY_CAPACITY_LEVEL_NORMAL;
@@ -390,11 +382,11 @@ static int bq40z50_get_property(struct power_supply *psy, enum power_supply_prop
 			val->intval = fg_get_batt_status(bq);
 			break;
 		case POWER_SUPPLY_PROP_VOLTAGE_NOW:
-			ret = fg_read_volt(bq);
+			ret = fg_read_voltage(bq);
 			mutex_lock(&bq->lock);
 			if (ret >= 0)
-				bq->batt_volt = ret;
-			val->intval = bq->batt_volt * 1000;
+				bq->battery_status.voltage = ret;
+			val->intval = bq->battery_status.voltage;
 			mutex_unlock(&bq->lock);
 
 			break;
@@ -403,21 +395,23 @@ static int bq40z50_get_property(struct power_supply *psy, enum power_supply_prop
 			break;
 		case POWER_SUPPLY_PROP_CURRENT_NOW:
 			mutex_lock(&bq->lock);
-			fg_read_current(bq, &bq->batt_curr);
-			val->intval = -bq->batt_curr * 1000;
+			ret = fg_read_current(bq);
+			if (ret >= 0)
+				bq->battery_status.curr = ret;
+			val->intval = bq->battery_status.curr;
 			mutex_unlock(&bq->lock);
 			break;
 
 		case POWER_SUPPLY_PROP_CAPACITY:
-			if (bq->fake_soc >= 0) {
-				val->intval = bq->fake_soc;
+			if (bq->battery_status.temp_state_of_charge >= 0) {
+				val->intval = bq->battery_status.temp_state_of_charge;
 				break;
 			}
-			ret = fg_read_rsoc(bq);
+			ret = fg_read_reletive_state_of_charge(bq);
 			mutex_lock(&bq->lock);
 			if (ret >= 0)
-				bq->batt_soc = ret;
-			val->intval = bq->batt_soc;
+				bq->battery_status.reletive_state_of_charge = ret;
+			val->intval = bq->battery_status.reletive_state_of_charge;
 			mutex_unlock(&bq->lock);
 			break;
 
@@ -426,15 +420,15 @@ static int bq40z50_get_property(struct power_supply *psy, enum power_supply_prop
 			break;
 
 		case POWER_SUPPLY_PROP_TEMP:
-			if (bq->fake_temp != -EINVAL) {
-				val->intval = bq->fake_temp;
+			if (bq->battery_status.temp_temperature != -EINVAL) {
+				val->intval = bq->battery_status.temp_temperature;
 				break;
 			}
 			ret = fg_read_temperature(bq);
 			mutex_lock(&bq->lock);
 			if (ret > 0)
-				bq->batt_temp = ret;
-			val->intval = bq->batt_temp;
+				bq->battery_status.temperature = ret;
+			val->intval = bq->battery_status.temperature;
 			mutex_unlock(&bq->lock);
 			break;
 
@@ -442,36 +436,36 @@ static int bq40z50_get_property(struct power_supply *psy, enum power_supply_prop
 			ret = fg_read_tte(bq);
 			mutex_lock(&bq->lock);
 			if (ret >= 0)
-				bq->batt_tte = ret;
+				bq->battery_status.time_to_empty = ret;
 
-			val->intval = bq->batt_tte;
+			val->intval = bq->battery_status.time_to_empty;
 			mutex_unlock(&bq->lock);
 			break;
 
 		case POWER_SUPPLY_PROP_CHARGE_FULL:
-			ret = fg_read_fcc(bq);
+			ret = fg_read_full_charge_capacity(bq);
 			mutex_lock(&bq->lock);
 			if (ret > 0)
-				bq->batt_fcc = ret;
-			val->intval = bq->batt_fcc * 1000;
+				bq->battery_status.full_charge_capacity = ret;
+			val->intval = bq->battery_status.full_charge_capacity;
 			mutex_unlock(&bq->lock);
 			break;
 
 		case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
-			ret = fg_read_dc(bq);
+			ret = fg_read_discharging(bq);
 			mutex_lock(&bq->lock);
 			if (ret > 0)
-				bq->batt_dc = ret;
-			val->intval = bq->batt_dc * 1000;
+				bq->battery_status.design_capacity = ret;
+			val->intval = bq->battery_status.design_capacity;
 			mutex_unlock(&bq->lock);
 			break;
 
 		case POWER_SUPPLY_PROP_CYCLE_COUNT:
-			ret = fg_read_cyclecount(bq);
+			ret = fg_read_cycle_count(bq);
 			mutex_lock(&bq->lock);
 			if (ret >= 0)
-				bq->batt_cyclecnt = ret;
-			val->intval = bq->batt_cyclecnt;
+				bq->battery_status.cycle_count = ret;
+			val->intval = bq->battery_status.cycle_count;
 			mutex_unlock(&bq->lock);
 			break;
 
@@ -493,10 +487,10 @@ static int bq40z50_set_property(struct power_supply *psy,
 
 	switch (prop) {
 		case POWER_SUPPLY_PROP_TEMP:
-			bq->fake_temp = val->intval;
+			bq->battery_status.temp_temperature = val->intval;
 			break;
 		case POWER_SUPPLY_PROP_CAPACITY:
-			bq->fake_soc = val->intval;
+			bq->battery_status.temp_state_of_charge = val->intval;
 			power_supply_changed(bq->charger);
 			break;
 		default:
@@ -721,11 +715,11 @@ static void fg_update_status(struct bq40z50_device *bq)
 
 	mutex_lock(&bq->lock);
 
-	bq->batt_soc = fg_read_rsoc(bq);
-	bq->batt_volt = fg_read_volt(bq);
-	fg_read_current(bq, &bq->batt_curr);
-	bq->batt_temp = fg_read_temperature(bq);
-	bq->batt_rm = fg_read_rm(bq);
+	bq->battery_status.reletive_state_of_charge = fg_read_reletive_state_of_charge(bq);
+	bq->battery_status.voltage = fg_read_voltage(bq);
+	bq->battery_status.curr = fg_read_current(bq);
+	bq->battery_status.temperature = fg_read_temperature(bq);
+	bq->battery_status.remaining_capacity = fg_read_remaining_capacity(bq);
 
 	mutex_unlock(&bq->lock);
 }
@@ -771,14 +765,13 @@ static int bq40z50_power_supply_init(struct bq40z50_device *bq,
 						&bq40z50_power_supply_desc,
 						&psy_cfg);
 	if (IS_ERR(bq->charger))
-	return -EINVAL;
+		return -EINVAL;
 
 	return 0;
 }
 
 static int bq_fg_probe(struct i2c_client *client)
 {
-	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct device *dev = &client->dev;
 	struct bq40z50_device *bq;
 	int ret;
@@ -791,17 +784,17 @@ static int bq_fg_probe(struct i2c_client *client)
 	bq->dev = dev;
 	bq->chip =  i2c_match_id(bq_fg_id, client)->driver_data;
 
-	bq->batt_soc    = -ENODATA;
-	bq->batt_fcc    = -ENODATA;
-	bq->batt_rm     = -ENODATA;
-	bq->batt_dc     = -ENODATA;
-	bq->batt_volt   = -ENODATA;
-	bq->batt_temp   = -ENODATA;
-	bq->batt_curr   = -ENODATA;
-	bq->batt_cyclecnt = -ENODATA;
+	bq->battery_status.reletive_state_of_charge		= -ENODATA;
+	bq->battery_status.full_charge_capacity			= -ENODATA;
+	bq->battery_status.remaining_capacity			= -ENODATA;
+	bq->battery_status.design_capacity				= -ENODATA;
+	bq->battery_status.voltage						= -ENODATA;
+	bq->battery_status.temperature					= -ENODATA;
+	bq->battery_status.curr						= -ENODATA;
+	bq->battery_status.cycle_count					= -ENODATA;
 
-	bq->fake_soc    = -EINVAL;
-	bq->fake_temp   = -EINVAL;
+	bq->battery_status.temp_state_of_charge    = -EINVAL;
+	bq->battery_status.temp_temperature   = -EINVAL;
 
 	bq->reg_addr	= BQ40Z50_CMD_MANUFACTURING_STATUS;
 
@@ -831,6 +824,10 @@ static int bq_fg_probe(struct i2c_client *client)
 	fg_read_fw_version(bq);
 
 	bq40z50_power_supply_init(bq, dev);
+	if (IS_ERR(bq->charger)) {
+		bq_err("Failed to register power supply\n");
+		return PTR_ERR(bq->charger);
+	}
 
 	ret = devm_device_add_group(bq->dev, &fg_attr_group);
 	if (ret) {
