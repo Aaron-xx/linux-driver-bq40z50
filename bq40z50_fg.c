@@ -39,15 +39,17 @@ struct bq40z50_battery_status {
 	bool remaining_capacity_alarm;
 
     int firmware_version;
-	int time_to_empty;
+
 	int reletive_state_of_charge;
 	int full_charge_capacity;
 	int remaining_capacity;
 	int design_capacity;
-	int voltage;
-	int temperature;
-	int curr;
+	int state_of_health;
+	int time_to_empty;
 	int cycle_count;
+	int temperature;
+	int voltage;
+	int curr;
 
 	int temp_state_of_charge;
 	int temp_temperature;
@@ -327,6 +329,19 @@ static int fg_read_tte(struct bq40z50_device *bq)
 	return tte;
 }
 
+static int fg_read_state_of_health(struct bq40z50_device *bq)
+{
+    u16 state_of_health;
+
+    int ret;
+	ret = fg_read_word(bq, BQ40Z50_CMD_STATE_OF_HEALTH, &state_of_health);
+	if (ret < 0) {
+		bq_err("could not read state_of_health, ret=%d\n", ret);
+		return ret;
+	}
+    return state_of_health;
+}
+
 static int fg_get_batt_status(struct bq40z50_device *bq)
 {
 
@@ -365,6 +380,7 @@ static enum power_supply_property bq40z50_power_supply_props[] = {
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
 	POWER_SUPPLY_PROP_TEMP,
+	POWER_SUPPLY_PROP_HEALTH,
 };
 
 static char *bq40z50_charger_supplied_to[] = {
@@ -473,6 +489,15 @@ static int bq40z50_get_property(struct power_supply *psy, enum power_supply_prop
 			val->intval = POWER_SUPPLY_TECHNOLOGY_LIPO;
 			break;
 
+		case POWER_SUPPLY_PROP_HEALTH:
+			ret =  fg_read_state_of_health(bq);
+			mutex_lock(&bq->lock);
+			if (ret > 0)
+				bq->battery_status.state_of_health = ret;
+			val->intval = POWER_SUPPLY_TECHNOLOGY_LIPO;
+			mutex_unlock(&bq->lock);
+			break;
+
 		default:
 			return -EINVAL;
 	}
@@ -526,11 +551,6 @@ static const struct power_supply_desc bq40z50_power_supply_desc = {
 	.set_property = bq40z50_set_property,
 	.property_is_writeable = bq40z50_property_is_writeable,
 };
-
-static void fg_psy_unregister(struct bq40z50_device *bq)
-{
-	power_supply_unregister(bq->charger);
-}
 
 static int fg_read_mac_status(struct bq40z50_device *bq)
 {
@@ -620,7 +640,7 @@ static ssize_t fg_attr_store_register_addr(struct device *dev,
 
 	if (sscanf(buf, "%x", &value) != 1)
 		return -EINVAL;
-	
+
 	reg_addr = (u8)value;
 	bq->reg_addr = reg_addr;
 	
@@ -790,7 +810,7 @@ static int bq_fg_probe(struct i2c_client *client)
 	bq->battery_status.design_capacity				= -ENODATA;
 	bq->battery_status.voltage						= -ENODATA;
 	bq->battery_status.temperature					= -ENODATA;
-	bq->battery_status.curr						= -ENODATA;
+	bq->battery_status.curr							= -ENODATA;
 	bq->battery_status.cycle_count					= -ENODATA;
 
 	bq->battery_status.temp_state_of_charge    = -EINVAL;
@@ -852,7 +872,6 @@ static void bq_fg_remove(struct i2c_client *client)
 	cancel_delayed_work_sync(&bq->monitor_work);
 	mutex_destroy(&bq->lock);
 	mutex_destroy(&bq->i2c_rw_lock);
-	fg_psy_unregister(bq);
 }
 
 static void bq_fg_shutdown(struct i2c_client *client)
